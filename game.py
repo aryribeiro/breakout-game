@@ -4,14 +4,18 @@ import requests
 import requests_cache
 import base64
 
-# Configura o cache para armazenar as requisições HTTP
-requests_cache.install_cache('sounds_cache', expire_after=86400)  # Cache válido por 1 dia
+# Configura o cache para requisições HTTP
+requests_cache.install_cache('sounds_cache', expire_after=86400)
 
 # Configuração inicial do Streamlit
-st.set_page_config(page_title="Breakout Web Game", page_icon="🎮")
+st.set_page_config(page_title="Breakout Web Game", page_icon="🎮", layout="wide")
 
-# Configurações básicas
-WINDOW_WIDTH = 800
+st.markdown("""
+    <h1 style='text-align: center;'>🎮Breakout Web Game</h1>
+""", unsafe_allow_html=True)
+
+# Configurações do jogo
+WINDOW_WIDTH = 900
 WINDOW_HEIGHT = 600
 BAR_WIDTH = 100
 BAR_HEIGHT = 20
@@ -20,7 +24,7 @@ BRICK_ROWS = 5
 BRICK_COLUMNS = 9
 BRICK_WIDTH = WINDOW_WIDTH // BRICK_COLUMNS
 BRICK_HEIGHT = 30
-FPS = 60  # Quadros por segundo
+FPS = 60
 
 # Cores
 BLACK = "#000000"
@@ -38,394 +42,377 @@ SOUND_URLS = {
     "brick": "https://www.soundjay.com/mechanical/gun-gunshot-02.mp3",
     "gameOver": "https://www.soundjay.com/misc/sounds/fail-trombone-01.mp3",
     "victory": "https://www.soundjay.com/human/applause-8.mp3",
-    "loseLife": "https://www.soundjay.com/misc/sounds/fail-buzzer-01.mp3",
+    "loseLife": "https://www.soundjay.com/misc/sounds/fail-buzzer-01.mp3"
 }
 
 # URL da logo do Python
 PYTHON_LOGO_URL = "https://www.python.org/static/community_logos/python-logo.png"
 
-# Função para carregar os sons do cache ou do site e codificar em Base64
+# Função para carregar sons com tratamento de erro
 def load_sound(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        return base64.b64encode(response.content).decode('utf-8')  # Codifica em Base64
-    return None
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        return base64.b64encode(response.content).decode('utf-8')
+    except Exception as e:
+        st.error(f"Erro ao carregar som de {url}: {e}")
+        return ""
 
-# Função para carregar a logo do Python e codificar em Base64
+# Função para carregar a logo do Python
 def load_python_logo():
-    response = requests.get(PYTHON_LOGO_URL)
-    if response.status_code == 200:
-        return base64.b64encode(response.content).decode('utf-8')  # Codifica em Base64
-    return None
+    try:
+        response = requests.get(PYTHON_LOGO_URL, timeout=5)
+        response.raise_for_status()
+        return base64.b64encode(response.content).decode('utf-8')
+    except Exception as e:
+        st.error(f"Erro ao carregar logo: {e}")
+        return ""
 
-# Carrega a logo do Python
+# Carrega recursos
 python_logo_base64 = load_python_logo()
+sounds_base64 = {key: load_sound(url) for key, url in SOUND_URLS.items()}
 
-# JavaScript e HTML do jogo
-breakout_js = f"""
-<script>
-class BreakoutGame {{
-    constructor(canvas) {{
-        this.canvas = canvas;
-        this.ctx = canvas.getContext("2d");
-
-        // Configurações do jogo
-        this.WINDOW_WIDTH = 800;
-        this.WINDOW_HEIGHT = 600;
-        this.BAR_WIDTH = 100;
-        this.BAR_HEIGHT = 20;
-        this.BALL_RADIUS = 10;
-        this.BRICK_ROWS = 5;
-        this.BRICK_COLUMNS = 9;
-        this.BRICK_WIDTH = this.WINDOW_WIDTH / this.BRICK_COLUMNS;
-        this.BRICK_HEIGHT = 30;
-        this.FPS = 60;
-
-        // Cores
-        this.BLACK = "#000000";
-        this.WHITE = "#FFFFFF";
-        this.RED = "#FF0000";
-        this.ORANGE = "#FFA500";
-        this.YELLOW = "#FFFF00";
-        this.GREEN = "#00FF00";
-        this.BLUE = "#0000FF";
-        this.BRICK_COLORS = [this.RED, this.ORANGE, this.YELLOW, this.GREEN, this.BLUE];
-
-        // Estado inicial
-        this.barPosition = [this.WINDOW_WIDTH / 2 - this.BAR_WIDTH / 2, this.WINDOW_HEIGHT - this.BAR_HEIGHT - 10];
-        this.ballPosition = [this.WINDOW_WIDTH / 2, this.WINDOW_HEIGHT / 2];
-        this.ballVelocity = [4, -4];  // Velocidade inicial da bola
-        this.bricks = [];
-        this.score = 0;
-        this.lives = 3;  // Vidas do jogador
-        this.maxScore = 0;  // Pontuação máxima
-        this.isDragging = false;
-
-        // Rastreamento das teclas pressionadas
-        this.keys = {{
-            ArrowLeft: false,
-            ArrowRight: false,
-        }};
-
-        // Sons do jogo
-        this.sounds = {{
-            bounce: this.createSoundPool("data:audio/mp3;base64,{load_sound(SOUND_URLS['bounce'])}", 5),  // Pool de 5 instâncias
-            brick: this.createSoundPool("data:audio/mp3;base64,{load_sound(SOUND_URLS['brick'])}", 5),    // Pool de 5 instâncias
-            gameOver: this.createSoundPool("data:audio/mp3;base64,{load_sound(SOUND_URLS['gameOver'])}", 1),
-            victory: this.createSoundPool("data:audio/mp3;base64,{load_sound(SOUND_URLS['victory'])}", 1),
-            loseLife: this.createSoundPool("data:audio/mp3;base64,{load_sound(SOUND_URLS['loseLife'])}", 1),
-        }};
-
-        // Carrega a logo do Python
-        this.pythonLogo = new Image();
-        this.pythonLogo.src = "data:image/png;base64,{python_logo_base64}";
-        this.pythonLogo.onload = () => {{
-            this.logoWidth = 211;  // Largura da logo
-            this.logoHeight = 71; // Altura da logo
-            this.logoX = (this.WINDOW_WIDTH - this.logoWidth) / 2;  // Centraliza horizontalmente
-            this.logoY = (this.WINDOW_HEIGHT - this.logoHeight) / 2;  // Centraliza verticalmente
-        }};
-
-        // Inicializa os tijolos
-        this.resetGame();
-
-        // Configura o canvas
-        this.canvas.width = this.WINDOW_WIDTH;
-        this.canvas.height = this.WINDOW_HEIGHT;
-
-        // Eventos do mouse
-        this.canvas.addEventListener("mousedown", (event) => this.handleMouseDown(event));
-        this.canvas.addEventListener("mouseup", () => this.handleMouseUp());
-        this.canvas.addEventListener("mousemove", (event) => this.handleMouseMove(event));
-
-        // Eventos do teclado
-        document.addEventListener("keydown", (event) => this.handleKeyDown(event));
-        document.addEventListener("keyup", (event) => this.handleKeyUp(event));
-
-        // Inicia o jogo
-        this.gameLoop();
-    }}
-
-    // Cria um pool de instâncias de áudio para evitar delays
-    createSoundPool(url, poolSize) {{
-        const pool = [];
-        for (let i = 0; i < poolSize; i++) {{
-            const audio = new Audio(url);
-            pool.push(audio);
-        }}
-        return pool;
-    }}
-
-    // Toca um som do pool
-    playSound(pool) {{
-        const audio = pool.find(a => a.paused);  // Encontra uma instância disponível
-        if (audio) {{
-            audio.currentTime = 0;  // Reinicia o som
-            audio.play();           // Toca o som
-        }}
-    }}
-
-    // Função para criar os tijolos
-    createBricks() {{
-        const bricks = [];
-        for (let row = 0; row < this.BRICK_ROWS; row++) {{
-            for (let col = 0; col < this.BRICK_COLUMNS; col++) {{
-                bricks.push({{
-                    x: col * this.BRICK_WIDTH,
-                    y: row * this.BRICK_HEIGHT + 50,
-                    color: this.BRICK_COLORS[row % this.BRICK_COLORS.length],
-                    width: this.BRICK_WIDTH - 2,  // Espaçamento entre tijolos
-                    height: this.BRICK_HEIGHT - 2,
-                }});
-            }}
-        }}
-        return bricks;
-    }}
-
-    resetGame() {{
-        this.bricks = this.createBricks();  // Usa a função createBricks para inicializar os tijolos
-        this.barPosition = [this.WINDOW_WIDTH / 2 - this.BAR_WIDTH / 2, this.WINDOW_HEIGHT - this.BAR_HEIGHT - 10];
-        this.ballPosition = [this.WINDOW_WIDTH / 2, this.WINDOW_HEIGHT / 2];
-        this.ballVelocity = [4, -4];  // Reinicia a velocidade da bola
-        this.score = 0;
-        this.lives = 3;  // Reinicia as vidas
-    }}
-
-    handleMouseDown(event) {{
-        const mouseX = event.clientX - this.canvas.offsetLeft;
-        const mouseY = event.clientY - this.canvas.offsetTop;
-        if (
-            mouseX >= this.barPosition[0] &&
-            mouseX <= this.barPosition[0] + this.BAR_WIDTH &&
-            mouseY >= this.barPosition[1] &&
-            mouseY <= this.barPosition[1] + this.BAR_HEIGHT
-        ) {{
-            this.isDragging = true;
-        }}
-    }}
-
-    handleMouseUp() {{
-        this.isDragging = false;  // Sempre define isDragging como false ao soltar o botão do mouse
-    }}
-
-    handleMouseMove(event) {{
-        if (this.isDragging && !this.keys.ArrowLeft && !this.keys.ArrowRight) {{
-            const mouseX = event.clientX - this.canvas.offsetLeft;
-            // Garante que a barra não ultrapasse os limites da tela
-            this.barPosition[0] = Math.max(0, Math.min(this.WINDOW_WIDTH - this.BAR_WIDTH, mouseX - this.BAR_WIDTH / 2));
-        }}
-    }}
-
-    handleKeyDown(event) {{
-        if (event.key in this.keys) {{
-            this.keys[event.key] = true;
-            this.isDragging = false;  // Desativa o controle do mouse ao usar o teclado
-        }}
-    }}
-
-    handleKeyUp(event) {{
-        if (event.key in this.keys) {{
-            this.keys[event.key] = false;
-        }}
-    }}
-
-    updateBarPosition() {{
-        // A velocidade da barra é proporcional à velocidade da bola
-        const moveSpeed = Math.max(6, Math.abs(this.ballVelocity[0]) * 1.5);  // Velocidade dinâmica
-        if (this.keys.ArrowLeft) {{
-            // Move a barra para a esquerda
-            this.barPosition[0] = Math.max(0, this.barPosition[0] - moveSpeed);
-        }}
-        if (this.keys.ArrowRight) {{
-            // Move a barra para a direita
-            this.barPosition[0] = Math.min(this.WINDOW_WIDTH - this.BAR_WIDTH, this.barPosition[0] + moveSpeed);
-        }}
-    }}
-
-    drawBar() {{
-        this.ctx.fillStyle = this.BLUE;
-        this.ctx.fillRect(this.barPosition[0], this.barPosition[1], this.BAR_WIDTH, this.BAR_HEIGHT);
-    }}
-
-    drawBall() {{
-        this.ctx.beginPath();
-        this.ctx.arc(this.ballPosition[0], this.ballPosition[1], this.BALL_RADIUS, 0, Math.PI * 2);
-        this.ctx.fillStyle = this.RED;
-        this.ctx.fill();
-        this.ctx.closePath();
-    }}
-
-    drawBricks() {{
-        this.bricks.forEach(brick => {{
-            this.ctx.fillStyle = brick.color;
-            this.ctx.fillRect(brick.x, brick.y, brick.width, brick.height);
-        }});
-    }}
-
-    drawScore() {{
-        this.ctx.font = "35px Arial";
-        this.ctx.fillStyle = this.WHITE;
-        this.ctx.fillText(`Pontos: ${{this.score}}`, 10, 30);
-        this.ctx.fillText(`Vidas: ${{this.lives}}`, this.WINDOW_WIDTH - 150, 30);
-        this.ctx.fillText(`Máximo: ${{this.maxScore}}`, this.WINDOW_WIDTH / 2 - 70, 30);
-    }}
-
-    drawPythonLogo() {{
-        if (this.pythonLogo.complete) {{
-            this.ctx.drawImage(
-                this.pythonLogo,
-                this.logoX,
-                this.logoY,
-                this.logoWidth,
-                this.logoHeight
-            );
-        }}
-    }}
-
-    updateGame() {{
-        // Limpa o canvas com a cor de fundo preta
-        this.ctx.fillStyle = this.BLACK;
-        this.ctx.fillRect(0, 0, this.WINDOW_WIDTH, this.WINDOW_HEIGHT);
-
-        // Desenha a logo do Python
-        this.drawPythonLogo();
-
-        // Desenha os elementos do jogo
-        this.drawBar();
-        this.drawBall();
-        this.drawBricks();
-        this.drawScore();
-
-        // Atualiza a lógica do jogo
-        this.updateGameLogic();
-    }}
-
-    updateGameLogic() {{
-        // Atualiza a posição da barra com base nas teclas pressionadas
-        this.updateBarPosition();
-
-        // Movimenta a bola
-        this.ballPosition[0] += this.ballVelocity[0];
-        this.ballPosition[1] += this.ballVelocity[1];
-
-        // Verifica colisões com as bordas
-        if (this.ballPosition[0] <= this.BALL_RADIUS || this.ballPosition[0] >= this.WINDOW_WIDTH - this.BALL_RADIUS) {{
-            this.ballVelocity[0] *= -1;
-            this.playSound(this.sounds.bounce);  // Reproduz som de colisão com a borda
-        }}
-        if (this.ballPosition[1] <= this.BALL_RADIUS) {{
-            this.ballVelocity[1] *= -1;
-            this.playSound(this.sounds.bounce);  // Reproduz som de colisão com a borda
-        }}
-
-        // Colisão com a barra
-        if (
-            this.ballPosition[1] + this.BALL_RADIUS >= this.barPosition[1] &&  // Verifica se a bola está na altura da barra
-            this.ballPosition[0] >= this.barPosition[0] - this.BALL_RADIUS &&  // Verifica se a bola está à esquerda da barra
-            this.ballPosition[0] <= this.barPosition[0] + this.BAR_WIDTH + this.BALL_RADIUS  // Verifica se a bola está à direita da barra
-        ) {{
-            this.ballVelocity[1] *= -1;  // Inverte a direção da bola
-            this.playSound(this.sounds.bounce);  // Reproduz som de colisão com a barra
-        }}
-
-        // Colisão com os tijolos
-        this.bricks.forEach((brick, index) => {{
-            if (
-                this.ballPosition[0] >= brick.x &&
-                this.ballPosition[0] <= brick.x + brick.width &&
-                this.ballPosition[1] >= brick.y &&
-                this.ballPosition[1] <= brick.y + brick.height
-            ) {{
-                this.bricks.splice(index, 1);
-                this.ballVelocity[1] *= -1;
-                this.score += 10;
-                this.playSound(this.sounds.brick);  // Reproduz som de colisão com tijolo
-
-                // Aumenta a dificuldade a cada 10 pontos (reduzido para 5%)
-                if (this.score % 10 === 0) {{
-                    this.ballVelocity[0] *= 1.05;  // Aumenta a velocidade em 5%
-                    this.ballVelocity[1] *= 1.05;
-                }}
-
-                // Atualiza a pontuação máxima
-                if (this.score > this.maxScore) {{
-                    this.maxScore = this.score;
-                }}
-            }}
-        }});
-
-        // Game over ou perda de vida
-        if (this.ballPosition[1] > this.WINDOW_HEIGHT) {{
-            this.lives -= 1;
-            this.playSound(this.sounds.loseLife);  // Reproduz som de perder vida
-            if (this.lives === 0) {{
-                this.playSound(this.sounds.gameOver);  // Reproduz som de game over
-                alert("                 GAME OVER!!!   Clique em OK para reiniciar o jogo.");
-                this.resetGame();
-            }} else {{
-                this.ballPosition = [this.WINDOW_WIDTH / 2, this.WINDOW_HEIGHT / 2];
-                this.ballVelocity = [4, -4];
-            }}
-        }}
-
-        // Vitória
-        if (this.bricks.length === 0) {{
-            this.playSound(this.sounds.victory);  // Reproduz som de vitória
-            alert("                 VOCÊ VENCEU!     Clique em OK p/ reiniciar o jogo.");
-            this.resetGame();
-        }}
-    }}
-
-    gameLoop() {{
-        this.updateGame();
-        requestAnimationFrame(() => this.gameLoop());
-    }}
-}}
-
-// Inicializa o jogo quando o componente é carregado
-document.addEventListener("DOMContentLoaded", () => {{
-    const canvas = document.getElementById("gameCanvas");
-    new BreakoutGame(canvas);
-}});
-</script>
-"""
-
-# HTML do jogo
+# HTML e JavaScript do jogo
 breakout_html = f"""
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Breakout Game</title>
     <style>
         canvas {{
+            border: 1px solid black;
             display: block;
             margin: 0 auto;
-            background: {BLACK};
+        }}
+        body {{
+            margin: 0;
+            overflow: hidden;
+            tabindex: 0;
         }}
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
-    {breakout_js}
+    <canvas id="gameCanvas" tabindex="0"></canvas>
+    <script>
+        class BreakoutGame {{
+            constructor(canvas) {{
+                this.canvas = canvas;
+                this.ctx = canvas.getContext("2d");
+                this.WINDOW_WIDTH = {WINDOW_WIDTH};
+                this.WINDOW_HEIGHT = {WINDOW_HEIGHT};
+                this.BAR_WIDTH = {BAR_WIDTH};
+                this.BAR_HEIGHT = {BAR_HEIGHT};
+                this.BALL_RADIUS = {BALL_RADIUS};
+                this.BRICK_ROWS = {BRICK_ROWS};
+                this.BRICK_COLUMNS = {BRICK_COLUMNS};
+                this.BRICK_WIDTH = {BRICK_WIDTH};
+                this.BRICK_HEIGHT = {BRICK_HEIGHT};
+                this.FPS = {FPS};
+
+                // Estado inicial
+                this.barPosition = [this.WINDOW_WIDTH / 2 - this.BAR_WIDTH / 2, this.WINDOW_HEIGHT - this.BAR_HEIGHT - 10];
+                this.ballPosition = [this.WINDOW_WIDTH / 2, this.barPosition[1] - this.BALL_RADIUS];
+                this.ballVelocity = [5, -5];
+                this.bricks = [];
+                this.score = 0;
+                this.lives = 3;
+                this.gameState = "initial";
+                this.ballStuckToBar = true;
+
+                // Sons
+                this.sounds = {{
+                    bounce: new Audio("data:audio/mp3;base64,{sounds_base64['bounce']}"),
+                    brick: new Audio("data:audio/mp3;base64,{sounds_base64['brick']}"),
+                    gameOver: new Audio("data:audio/mp3;base64,{sounds_base64['gameOver']}"),
+                    victory: new Audio("data:audio/mp3;base64,{sounds_base64['victory']}"),
+                    loseLife: new Audio("data:audio/mp3;base64,{sounds_base64['loseLife']}")
+                }};
+
+                // Logo
+                this.pythonLogo = new Image();
+                this.pythonLogo.src = "data:image/png;base64,{python_logo_base64}";
+                this.pythonLogo.onload = () => {{
+                    this.logoWidth = 211;
+                    this.logoHeight = 71;
+                    this.logoX = (this.WINDOW_WIDTH - this.logoWidth) / 2;
+                    this.logoY = (this.WINDOW_HEIGHT - this.logoHeight) / 2;
+                }};
+
+                // Configura canvas
+                this.canvas.width = this.WINDOW_WIDTH;
+                this.canvas.height = this.WINDOW_HEIGHT;
+
+                // Inicializa tijolos
+                this.createBricks();
+
+                // Eventos
+                this.setupEvents();
+
+                // Inicia loop
+                this.lastTime = performance.now();
+                this.gameLoop(this.lastTime);
+            }}
+
+            createBricks() {{
+                this.bricks = [];
+                for (let row = 0; row < this.BRICK_ROWS; row++) {{
+                    for (let col = 0; col < this.BRICK_COLUMNS; col++) {{
+                        this.bricks.push({{
+                            x: col * this.BRICK_WIDTH + 1,
+                            y: row * this.BRICK_HEIGHT + 50,
+                            width: this.BRICK_WIDTH - 2,
+                            height: this.BRICK_HEIGHT - 2,
+                            color: ["{RED}", "{ORANGE}", "{YELLOW}", "{GREEN}", "{BLUE}"][row % 5]
+                        }});
+                    }}
+                }}
+            }}
+
+            setupEvents() {{
+                this.canvas.addEventListener("mousemove", (e) => {{
+                    const rect = this.canvas.getBoundingClientRect();
+                    this.barPosition[0] = Math.max(0, Math.min(
+                        this.WINDOW_WIDTH - this.BAR_WIDTH,
+                        e.clientX - rect.left - this.BAR_WIDTH / 2
+                    ));
+                    console.log("Mouse moved, bar position:", this.barPosition[0]);
+                }});
+                this.canvas.addEventListener("click", () => {{
+                    console.log("Canvas clicked, current state:", this.gameState);
+                    if (this.gameState === "initial" || this.ballStuckToBar) {{
+                        this.gameState = "playing";
+                        this.ballStuckToBar = false;
+                        console.log("Game started, state changed to playing");
+                    }} else if (this.gameState === "gameOver" || this.gameState === "victory") {{
+                        this.resetGame();
+                        console.log("Game reset");
+                    }}
+                }});
+                document.addEventListener("keydown", (e) => {{
+                    if (e.code === "Space" && (this.gameState === "initial" || this.ballStuckToBar)) {{
+                        console.log("Space pressed, starting game");
+                        this.gameState = "playing";
+                        this.ballStuckToBar = false;
+                        e.preventDefault();
+                    }}
+                }});
+            }}
+
+            resetGame() {{
+                this.score = 0;
+                this.lives = 3;
+                this.gameState = "initial";
+                this.ballStuckToBar = true;
+                this.barPosition = [this.WINDOW_WIDTH / 2 - this.BAR_WIDTH / 2, this.WINDOW_HEIGHT - this.BAR_HEIGHT - 10];
+                this.ballPosition = [this.WINDOW_WIDTH / 2, this.barPosition[1] - this.BALL_RADIUS];
+                this.ballVelocity = [5, -5];
+                this.createBricks();
+            }}
+
+            resetBall() {{
+                this.ballPosition = [this.barPosition[0] + this.BAR_WIDTH / 2, this.barPosition[1] - this.BALL_RADIUS];
+                this.ballVelocity = [5, -5];
+                this.ballStuckToBar = true;
+            }}
+
+            gameLoop(currentTime) {{
+                const deltaTime = Math.min(currentTime - this.lastTime, 100);
+                this.lastTime = currentTime;
+
+                if (this.gameState === "playing") {{
+                    this.update(deltaTime / 1000);
+                }}
+                this.render();
+
+                requestAnimationFrame((time) => this.gameLoop(time));
+            }}
+
+            update(deltaTime) {{
+                if (this.ballStuckToBar) {{
+                    this.ballPosition[0] = this.barPosition[0] + this.BAR_WIDTH / 2;
+                    return;
+                }}
+
+                this.ballPosition[0] += this.ballVelocity[0] * deltaTime * this.FPS;
+                this.ballPosition[1] += this.ballVelocity[1] * deltaTime * this.FPS;
+
+                // Colisão com paredes
+                if (this.ballPosition[0] - this.BALL_RADIUS <= 0) {{
+                    this.ballPosition[0] = this.BALL_RADIUS;
+                    this.ballVelocity[0] = Math.abs(this.ballVelocity[0]);
+                    this.playSound(this.sounds.bounce);
+                }} else if (this.ballPosition[0] + this.BALL_RADIUS >= this.WINDOW_WIDTH) {{
+                    this.ballPosition[0] = this.WINDOW_WIDTH - this.BALL_RADIUS;
+                    this.ballVelocity[0] = -Math.abs(this.ballVelocity[0]);
+                    this.playSound(this.sounds.bounce);
+                }}
+                if (this.ballPosition[1] - this.BALL_RADIUS <= 0) {{
+                    this.ballPosition[1] = this.BALL_RADIUS;
+                    this.ballVelocity[1] = Math.abs(this.ballVelocity[1]);
+                    this.playSound(this.sounds.bounce);
+                }}
+
+                // Colisão com o fundo (perda de vida)
+                if (this.ballPosition[1] + this.BALL_RADIUS >= this.WINDOW_HEIGHT) {{
+                    this.lives--;
+                    this.playSound(this.sounds.loseLife);
+                    if (this.lives <= 0) {{
+                        this.gameState = "gameOver";
+                        this.playSound(this.sounds.gameOver);
+                    }} else {{
+                        this.resetBall();
+                    }}
+                    return;
+                }}
+
+                // Colisão com a barra
+                if (
+                    this.ballPosition[1] + this.BALL_RADIUS >= this.barPosition[1] &&
+                    this.ballPosition[1] - this.BALL_RADIUS <= this.barPosition[1] + this.BAR_HEIGHT &&
+                    this.ballPosition[0] >= this.barPosition[0] &&
+                    this.ballPosition[0] <= this.barPosition[0] + this.BAR_WIDTH
+                ) {{
+                    const hitPos = (this.ballPosition[0] - this.barPosition[0]) / this.BAR_WIDTH;
+                    const angle = (hitPos - 0.5) * Math.PI * 0.8;
+                    const speed = Math.sqrt(this.ballVelocity[0] ** 2 + this.ballVelocity[1] ** 2);
+                    this.ballVelocity[0] = Math.sin(angle) * speed;
+                    this.ballVelocity[1] = -Math.cos(angle) * speed;
+                    this.ballPosition[1] = this.barPosition[1] - this.BALL_RADIUS;
+                    this.playSound(this.sounds.bounce);
+                }}
+
+                // Colisão com tijolos
+                for (let i = this.bricks.length - 1; i >= 0; i--) {{
+                    const brick = this.bricks[i];
+                    if (
+                        this.ballPosition[0] + this.BALL_RADIUS >= brick.x &&
+                        this.ballPosition[0] - this.BALL_RADIUS <= brick.x + brick.width &&
+                        this.ballPosition[1] + this.BALL_RADIUS >= brick.y &&
+                        this.ballPosition[1] - this.BALL_RADIUS <= brick.y + brick.height
+                    ) {{
+                        this.bricks.splice(i, 1);
+                        this.score += 10;
+                        this.ballVelocity[1] *= -1;
+                        this.playSound(this.sounds.brick);
+                        if (this.bricks.length === 0) {{
+                            this.gameState = "victory";
+                            this.playSound(this.sounds.victory);
+                        }}
+                        break;
+                    }}
+                }}
+            }}
+
+            playSound(audio) {{
+                if (audio.src.includes("base64,,")) return;
+                audio.currentTime = 0;
+                audio.play().catch((e) => console.error("Erro ao tocar som:", e));
+            }}
+
+            render() {{
+                // Limpa o canvas
+                this.ctx.fillStyle = "{BLACK}";
+                this.ctx.fillRect(0, 0, this.WINDOW_WIDTH, this.WINDOW_HEIGHT);
+
+                // Desenha logo
+                if (this.pythonLogo.complete) {{
+                    this.ctx.globalAlpha = this.gameState === "playing" ? 0.2 : 1.0;
+                    this.ctx.drawImage(this.pythonLogo, this.logoX, this.logoY, this.logoWidth, this.logoHeight);
+                    this.ctx.globalAlpha = 1.0;
+                }}
+
+                // Desenha barra
+                this.ctx.fillStyle = "{BLUE}";
+                this.ctx.fillRect(this.barPosition[0], this.barPosition[1], this.BAR_WIDTH, this.BAR_HEIGHT);
+
+                // Desenha bola
+                this.ctx.beginPath();
+                this.ctx.arc(this.ballPosition[0], this.ballPosition[1], this.BALL_RADIUS, 0, Math.PI * 2);
+                this.ctx.fillStyle = "{RED}";
+                this.ctx.fill();
+                this.ctx.closePath();
+
+                // Desenha tijolos
+                this.bricks.forEach((brick) => {{
+                    this.ctx.fillStyle = brick.color;
+                    this.ctx.fillRect(brick.x, brick.y, brick.width, brick.height);
+                }});
+
+                // Desenha HUD
+                this.ctx.fillStyle = "{RED}";
+                this.ctx.font = "24px Arial";
+                this.ctx.textAlign = "left";
+                this.ctx.fillText(`Score: ${{this.score}} Lives: ${{this.lives}}`, 10, 30);
+
+                // Desenha mensagens
+                this.ctx.textAlign = "center";
+                this.ctx.font = "54px Arial Black";
+                if (this.gameState === "initial" || this.ballStuckToBar) {{
+                    this.ctx.fillText("clique no mouse", this.WINDOW_WIDTH / 2, this.WINDOW_HEIGHT / 2 + 50);
+                }} else if (this.gameState === "gameOver") {{
+                    this.ctx.fillText("Game Over!", this.WINDOW_WIDTH / 2, this.WINDOW_HEIGHT / 2);
+                }} else if (this.gameState === "victory") {{
+                    this.ctx.fillText("Vitória!", this.WINDOW_WIDTH / 2, this.WINDOW_HEIGHT / 2);
+                }}
+            }}
+        }}
+
+        // Inicializa o jogo
+        window.addEventListener('DOMContentLoaded', () => {{
+            try {{
+                const canvas = document.getElementById("gameCanvas");
+                if (!canvas) throw new Error("Canvas não encontrado");
+                const game = new BreakoutGame(canvas);
+                console.log("Jogo Breakout inicializado com sucesso");
+                document.body.focus();
+            }} catch (e) {{
+                console.error("Erro ao inicializar o jogo:", e);
+            }}
+        }});
+    </script>
 </body>
 </html>
 """
 
-# Exibe o jogo no Streamlit
-def breakout_game():
-    components.html(breakout_html, height=620, width=900)
+# Renderiza o jogo
+components.html(breakout_html, height=WINDOW_HEIGHT + 50, scrolling=False)
 
-# Interface do Streamlit
-st.title("🎮Breakout Web Game")
-breakout_game()
-
-# informações de contato
 st.markdown("""
----
-#### 🎮Breakout Web Game: em Python, Streamlit e outros.
-💬 Por **Ary Ribeiro**. Contato, através do email: aryribeiro@gmail.com
-\n Obs.: o app foi testado em computador. Use o teclado ou o mouse p/ controlar a barra. Caso esteja
-\n usando smartphone, procure ativar o recurso **"Versão para Computador"** do navegador.
-""")
+<div style="text-align: center;">
+    <h4>🎮Breakout Web Game: em Python, Streamlit e outros.</h4>
+    💬 Por <strong>Ary Ribeiro</strong>. Contato, através do email: <a href="mailto:aryribeiro@gmail.com">aryribeiro@gmail.com</a><br><br>
+    <em>Obs.: o app foi testado apenas em computador. Use o mouse p/ controlar a barra.<br>
+    No smartphone, procure ativar o recurso <strong>"Versão para Computador"</strong> do navegador.</em>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+    .main {
+        background-color: #ffffff;
+        color: #333333;
+    }
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+    }
+    /* Esconde completamente todos os elementos da barra padrão do Streamlit */
+    header {display: none !important;}
+    footer {display: none !important;}
+    #MainMenu {display: none !important;}
+    /* Remove qualquer espaço em branco adicional */
+    div[data-testid="stAppViewBlockContainer"] {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    div[data-testid="stVerticalBlock"] {
+        gap: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    /* Remove quaisquer margens extras */
+    .element-container {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
