@@ -69,6 +69,7 @@ breakout_html = f"""
             border: 1px solid black;
             display: block;
             margin: 0 auto;
+            cursor: none;
         }}
         body {{
             margin: 0;
