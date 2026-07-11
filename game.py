@@ -1,12 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import requests
-import requests_cache
 import base64
 import os
-
-# Configura o cache para requisições HTTP
-requests_cache.install_cache('sounds_cache', expire_after=86400)
 
 # Configuração inicial do Streamlit
 st.set_page_config(page_title="Breakout Web Game", page_icon="🎮", layout="wide")
@@ -47,32 +42,22 @@ SOUND_FILES = {
     "loseLife": "fail-buzzer-01.mp3"
 }
 
-# URL da logo do Python
-PYTHON_LOGO_URL = "https://www.python.org/static/community_logos/python-logo.png"
+# Logo local do Python (pasta "som")
+PYTHON_LOGO_FILE = "python-logo.png"
 
-# Função para carregar sons locais com tratamento de erro
-def load_sound(filename):
+# Função para carregar arquivos locais em base64 com tratamento de erro
+def load_asset(filename):
     filepath = os.path.join(SOUND_DIR, filename)
     try:
         with open(filepath, "rb") as f:
             return base64.b64encode(f.read()).decode('utf-8')
     except Exception as e:
-        st.error(f"Erro ao carregar som de {filepath}: {e}")
-        return ""
-
-# Função para carregar a logo do Python
-def load_python_logo():
-    try:
-        response = requests.get(PYTHON_LOGO_URL, timeout=5)
-        response.raise_for_status()
-        return base64.b64encode(response.content).decode('utf-8')
-    except Exception as e:
-        st.error(f"Erro ao carregar logo: {e}")
+        st.error(f"Erro ao carregar arquivo {filepath}: {e}")
         return ""
 
 # Carrega recursos
-python_logo_base64 = load_python_logo()
-sounds_base64 = {key: load_sound(filename) for key, filename in SOUND_FILES.items()}
+python_logo_base64 = load_asset(PYTHON_LOGO_FILE)
+sounds_base64 = {key: load_asset(filename) for key, filename in SOUND_FILES.items()}
 
 # HTML e JavaScript do jogo
 breakout_html = f"""
