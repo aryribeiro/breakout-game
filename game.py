@@ -367,7 +367,7 @@ components.html(breakout_html, height=WINDOW_HEIGHT + 50, scrolling=False)
 st.markdown("""
 <div style="text-align: center;">
     <h4>🎮Breakout Web Game: em Python, Streamlit e outros.</h4>
-    💬 Por <strong>Ary Ribeiro</strong>. Contato, através do email: <a href="mailto:aryribeiro@gmail.com">aryribeiro@gmail.com</a><br><br>
+    💬 Por <strong>Ary Ribeiro</strong>: <a href="https://www.linkedin.com/in/aryribeiro" target="_blank">linkedin.com/in/aryribeiro</a><br><br>
     <em>Obs.: o app foi testado apenas em computador. Use o mouse p/ controlar a barra.<br>
     No smartphone, procure ativar o recurso <strong>"Versão para Computador"</strong> do navegador.</em>
 </div>
