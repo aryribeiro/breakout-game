@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import requests
 import requests_cache
 import base64
+import os
 
 # Configura o cache para requisições HTTP
 requests_cache.install_cache('sounds_cache', expire_after=86400)
@@ -36,26 +37,27 @@ GREEN = "#00FF00"
 BLUE = "#0000FF"
 BRICK_COLORS = [RED, ORANGE, YELLOW, GREEN, BLUE]
 
-# URLs dos sons
-SOUND_URLS = {
-    "bounce": "https://www.soundjay.com/phone/cell-phone-1-nr7.mp3",
-    "brick": "https://www.soundjay.com/mechanical/gun-gunshot-02.mp3",
-    "gameOver": "https://www.soundjay.com/misc/sounds/fail-trombone-01.mp3",
-    "victory": "https://www.soundjay.com/human/applause-8.mp3",
-    "loseLife": "https://www.soundjay.com/misc/sounds/fail-buzzer-01.mp3"
+# Arquivos de som locais (pasta "som")
+SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "som")
+SOUND_FILES = {
+    "bounce": "cell-phone-1-nr7.mp3",
+    "brick": "gun-gunshot-02.mp3",
+    "gameOver": "fail-trombone-01.mp3",
+    "victory": "applause-8.mp3",
+    "loseLife": "fail-buzzer-01.mp3"
 }
 
 # URL da logo do Python
 PYTHON_LOGO_URL = "https://www.python.org/static/community_logos/python-logo.png"
 
-# Função para carregar sons com tratamento de erro
-def load_sound(url):
+# Função para carregar sons locais com tratamento de erro
+def load_sound(filename):
+    filepath = os.path.join(SOUND_DIR, filename)
     try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        return base64.b64encode(response.content).decode('utf-8')
+        with open(filepath, "rb") as f:
+            return base64.b64encode(f.read()).decode('utf-8')
     except Exception as e:
-        st.error(f"Erro ao carregar som de {url}: {e}")
+        st.error(f"Erro ao carregar som de {filepath}: {e}")
         return ""
 
 # Função para carregar a logo do Python
@@ -70,7 +72,7 @@ def load_python_logo():
 
 # Carrega recursos
 python_logo_base64 = load_python_logo()
-sounds_base64 = {key: load_sound(url) for key, url in SOUND_URLS.items()}
+sounds_base64 = {key: load_sound(filename) for key, filename in SOUND_FILES.items()}
 
 # HTML e JavaScript do jogo
 breakout_html = f"""
