@@ -12,6 +12,8 @@ Este projeto é um jogo clássico Breakout implementado utilizando Python, Strea
 - **JavaScript**: Utilizado para a implementação do jogo e interação com a interface.
 - **HTML5 Canvas**: Utilizado para renderizar o jogo na tela.
 
+Os efeitos sonoros e a logo ficam na pasta `som/` e são embutidos diretamente no jogo, sem depender de servidores externos.
+
 ## Como Rodar o Projeto
 
 1. Clone o repositório:
@@ -27,7 +29,7 @@ Este projeto é um jogo clássico Breakout implementado utilizando Python, Strea
 
 3. Execute o aplicativo:
     ```bash
-    streamlit run app.py
+    streamlit run game.py
     ```
 
 4. Acesse o jogo via navegador (funciona melhor em desktop, utilize a versão para computador em smartphones).
