@@ -54,8 +54,11 @@ SOUND_FILES = {
 PYTHON_LOGO_FILE = "python-logo.png"
 
 
-# Função para carregar arquivos locais em base64 com tratamento de erro
-@st.cache_data
+# Função para carregar arquivos locais em base64 com tratamento de erro.
+# show_spinner=False é obrigatório: o spinner só aparece na primeira execução e,
+# ao sumir, altera a árvore de elementos entre um run e outro — o que faz o React
+# remontar o iframe e reiniciar a partida no primeiro rerun (o dos balões).
+@st.cache_data(show_spinner=False)
 def load_asset(filename):
     filepath = os.path.join(SOUND_DIR, filename)
     try:
@@ -226,6 +229,15 @@ GAME_JS = """
         }
     }
 
+    // Os balões são do Streamlit e só saem de um rerun do Python: o jogo pede
+    // clicando no botão escondido que o app deixa no documento pai.
+    function celebrate() {
+        try {
+            const button = window.parent.document.querySelector('div[data-testid="stButton"] button');
+            if (button) button.click();
+        } catch (e) { /* sem acesso ao pai: segue sem balões */ }
+    }
+
     class BreakoutGame {
         constructor(canvas, sounds) {
             this.canvas = canvas;
@@ -233,6 +245,13 @@ GAME_JS = """
             this.sounds = sounds;
             this.canvas.width = W;
             this.canvas.height = H;
+
+            // Posição pedida pelo ponteiro, aplicada uma vez por frame. Ler o
+            // rect a cada mousemove forçava recálculo de layout e travava a
+            // barra por instantes quando o mouse se movia rápido.
+            this.pointerX = null;
+            this.canvasRect = null;
+            this.frameLeft = 0;
 
             this.logo = new Image();
             this.logo.src = cfg.logo;
@@ -318,16 +337,28 @@ GAME_JS = """
         // ---------- eventos ----------
 
         setupEvents() {
-            this.canvas.addEventListener("mousemove", (e) => this.moveBar(e.clientX));
+            this.refreshRects();
+
+            // O movimento é escutado no documento inteiro, e não só no canvas:
+            // num gesto rápido o cursor sai da área do jogo e os eventos parariam
+            // de chegar, deixando a barra parada até o mouse voltar.
+            document.addEventListener("pointermove", (e) => this.setPointer(e.clientX));
+            try {
+                window.parent.document.addEventListener("pointermove", (e) => {
+                    this.setPointer(e.clientX - this.frameLeft);
+                });
+                window.parent.addEventListener("scroll", () => this.refreshRects(), true);
+            } catch (e) { /* sem acesso ao pai: o listener local já cobre o canvas */ }
+
             this.canvas.addEventListener("click", () => this.handleAction());
             this.canvas.addEventListener("touchstart", (e) => {
                 e.preventDefault();
-                this.moveBar(e.touches[0].clientX);
+                this.setPointer(e.touches[0].clientX);
                 this.handleAction();
             }, { passive: false });
             this.canvas.addEventListener("touchmove", (e) => {
                 e.preventDefault();
-                this.moveBar(e.touches[0].clientX);
+                this.setPointer(e.touches[0].clientX);
             }, { passive: false });
 
             document.addEventListener("keydown", (e) => {
@@ -348,13 +379,29 @@ GAME_JS = """
             });
         }
 
-        // O canvas escala por CSS, então o pixel da tela precisa virar
-        // coordenada do jogo antes de posicionar a barra.
-        moveBar(clientX) {
-            const rect = this.canvas.getBoundingClientRect();
-            if (!rect.width) return;
-            const x = (clientX - rect.left) * (W / rect.width);
-            this.barPosition[0] = Math.max(0, Math.min(W - BAR_W, x - BAR_W / 2));
+        // Ler geometria força o browser a recalcular layout, então os rects são
+        // medidos só quando de fato mudam (resize, scroll), nunca por evento.
+        refreshRects() {
+            this.canvasRect = this.canvas.getBoundingClientRect();
+            try {
+                const frame = window.frameElement;
+                this.frameLeft = frame ? frame.getBoundingClientRect().left : 0;
+            } catch (e) {
+                this.frameLeft = 0;
+            }
+        }
+
+        // Guarda a intenção do ponteiro; o canvas escala por CSS, então o pixel
+        // da tela vira coordenada do jogo aqui.
+        setPointer(clientX) {
+            const rect = this.canvasRect;
+            if (!rect || !rect.width) return;
+            this.pointerX = (clientX - rect.left) * (W / rect.width);
+        }
+
+        applyPointer() {
+            if (this.pointerX === null) return;
+            this.barPosition[0] = Math.max(0, Math.min(W - BAR_W, this.pointerX - BAR_W / 2));
         }
 
         handleAction() {
@@ -453,6 +500,7 @@ GAME_JS = """
             const deltaTime = Math.min(currentTime - this.lastTime, 100) / 1000;
             this.lastTime = currentTime;
 
+            this.applyPointer();
             if (this.gameState === "playing") this.update(deltaTime);
             this.updateEffects(deltaTime);
             this.render();
@@ -587,6 +635,7 @@ GAME_JS = """
                             this.gameState = "levelComplete";
                             this.sounds.play("victory", 0.6);
                         }
+                        celebrate();
                         return false;
                     }
                     break;
@@ -760,11 +809,16 @@ GAME_JS = """
 
     // O iframe do Streamlit tem altura fixa; com o canvas responsivo ela precisa
     // acompanhar a altura real do conteúdo, senão sobra faixa vazia no mobile.
+    let lastFrameHeight = 0;
     function fitFrame() {
         try {
             const frame = window.frameElement;
             if (!frame) return;
             const height = Math.ceil(document.getElementById("wrap").getBoundingClientRect().height) + 4;
+            // Redimensionar o iframe reflui o canvas, que dispara o observer de
+            // novo: sem esta guarda o resize realimenta a si mesmo.
+            if (height === lastFrameHeight) return;
+            lastFrameHeight = height;
             frame.style.height = height + "px";
             frame.height = height;
         } catch (e) { /* cross-origin: mantém a altura definida no Python */ }
@@ -785,8 +839,13 @@ GAME_JS = """
 
             canvas.focus();
             fitFrame();
-            window.addEventListener("resize", fitFrame);
-            new ResizeObserver(fitFrame).observe(canvas);
+            const onLayoutChange = () => {
+                fitFrame();
+                game.refreshRects();
+            };
+            window.addEventListener("resize", onLayoutChange);
+            window.addEventListener("scroll", () => game.refreshRects());
+            new ResizeObserver(onLayoutChange).observe(canvas);
 
             // Superfície de inspeção usada pelos testes de ponta a ponta
             window.__breakout = { game: game, sounds: sounds, isTouch: IS_TOUCH };
@@ -813,6 +872,13 @@ breakout_html = (
 # Renderiza o jogo
 components.html(breakout_html, height=WINDOW_HEIGHT + 60, scrolling=False)
 
+# Canal de celebração: os balões são um recurso do Streamlit, não do canvas, e só
+# podem ser disparados a partir do Python. O jogo, dentro do iframe, clica neste
+# botão (escondido via CSS) ao concluir um nível ou zerar o jogo. O rerun que isso
+# provoca não recarrega o iframe, então a partida em andamento é preservada.
+if st.button("celebrar", key="celebrate"):
+    st.balloons()
+
 st.markdown("""
 <div style="text-align: center;">
     <h4>🎮Breakout Web Game: em Python, Streamlit e outros.</h4>
@@ -836,6 +902,15 @@ st.markdown("""
     div[data-testid="stElementContainer"]:has(iframe[data-testid="stIFrame"]) {
         height: auto !important;
         flex-basis: auto !important;
+    }
+    /* Botão do canal de celebração: precisa existir e ser clicável pelo JS do
+       jogo, mas nunca aparecer. Fica fora da tela em vez de display:none, que
+       impediria o clique. */
+    div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]) {
+        position: absolute;
+        left: -9999px;
+        height: 0 !important;
+        flex-basis: 0 !important;
     }
     /* Esconde completamente todos os elementos da barra padrão do Streamlit */
     header {display: none !important;}
