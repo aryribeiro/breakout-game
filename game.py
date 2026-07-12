@@ -24,13 +24,11 @@ FPS = 60
 
 # Cores
 BLACK = "#000000"
-WHITE = "#FFFFFF"
 RED = "#FF0000"
 ORANGE = "#FFA500"
 YELLOW = "#FFFF00"
 GREEN = "#00FF00"
 BLUE = "#0000FF"
-BRICK_COLORS = [RED, ORANGE, YELLOW, GREEN, BLUE]
 
 # Arquivos de som locais (pasta "som")
 SOUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "som")
@@ -46,6 +44,7 @@ SOUND_FILES = {
 PYTHON_LOGO_FILE = "python-logo.png"
 
 # Função para carregar arquivos locais em base64 com tratamento de erro
+@st.cache_data
 def load_asset(filename):
     filepath = os.path.join(SOUND_DIR, filename)
     try:
@@ -70,11 +69,11 @@ breakout_html = f"""
             display: block;
             margin: 0 auto;
             cursor: none;
+            outline: none;
         }}
         body {{
             margin: 0;
             overflow: hidden;
-            tabindex: 0;
         }}
     </style>
 </head>
@@ -96,16 +95,6 @@ breakout_html = f"""
                 this.BRICK_HEIGHT = {BRICK_HEIGHT};
                 this.FPS = {FPS};
 
-                // Estado inicial
-                this.barPosition = [this.WINDOW_WIDTH / 2 - this.BAR_WIDTH / 2, this.WINDOW_HEIGHT - this.BAR_HEIGHT - 10];
-                this.ballPosition = [this.WINDOW_WIDTH / 2, this.barPosition[1] - this.BALL_RADIUS];
-                this.ballVelocity = [5, -5];
-                this.bricks = [];
-                this.score = 0;
-                this.lives = 3;
-                this.gameState = "initial";
-                this.ballStuckToBar = true;
-
                 // Sons
                 this.sounds = {{
                     bounce: new Audio("data:audio/mp3;base64,{sounds_base64['bounce']}"),
@@ -118,19 +107,17 @@ breakout_html = f"""
                 // Logo
                 this.pythonLogo = new Image();
                 this.pythonLogo.src = "data:image/png;base64,{python_logo_base64}";
-                this.pythonLogo.onload = () => {{
-                    this.logoWidth = 211;
-                    this.logoHeight = 71;
-                    this.logoX = (this.WINDOW_WIDTH - this.logoWidth) / 2;
-                    this.logoY = (this.WINDOW_HEIGHT - this.logoHeight) / 2;
-                }};
+                this.logoWidth = 211;
+                this.logoHeight = 71;
+                this.logoX = (this.WINDOW_WIDTH - this.logoWidth) / 2;
+                this.logoY = (this.WINDOW_HEIGHT - this.logoHeight) / 2;
 
                 // Configura canvas
                 this.canvas.width = this.WINDOW_WIDTH;
                 this.canvas.height = this.WINDOW_HEIGHT;
 
-                // Inicializa tijolos
-                this.createBricks();
+                // Estado inicial
+                this.resetGame();
 
                 // Eventos
                 this.setupEvents();
@@ -162,27 +149,23 @@ breakout_html = f"""
                         this.WINDOW_WIDTH - this.BAR_WIDTH,
                         e.clientX - rect.left - this.BAR_WIDTH / 2
                     ));
-                    console.log("Mouse moved, bar position:", this.barPosition[0]);
                 }});
-                this.canvas.addEventListener("click", () => {{
-                    console.log("Canvas clicked, current state:", this.gameState);
-                    if (this.gameState === "initial" || this.ballStuckToBar) {{
-                        this.gameState = "playing";
-                        this.ballStuckToBar = false;
-                        console.log("Game started, state changed to playing");
-                    }} else if (this.gameState === "gameOver" || this.gameState === "victory") {{
-                        this.resetGame();
-                        console.log("Game reset");
-                    }}
-                }});
+                this.canvas.addEventListener("click", () => this.handleAction());
                 document.addEventListener("keydown", (e) => {{
-                    if (e.code === "Space" && (this.gameState === "initial" || this.ballStuckToBar)) {{
-                        console.log("Space pressed, starting game");
-                        this.gameState = "playing";
-                        this.ballStuckToBar = false;
+                    if (e.code === "Space") {{
                         e.preventDefault();
+                        this.handleAction();
                     }}
                 }});
+            }}
+
+            handleAction() {{
+                if (this.gameState === "initial" || this.ballStuckToBar) {{
+                    this.gameState = "playing";
+                    this.ballStuckToBar = false;
+                }} else if (this.gameState === "gameOver" || this.gameState === "victory") {{
+                    this.resetGame();
+                }}
             }}
 
             resetGame() {{
@@ -220,9 +203,21 @@ breakout_html = f"""
                     return;
                 }}
 
-                this.ballPosition[0] += this.ballVelocity[0] * deltaTime * this.FPS;
-                this.ballPosition[1] += this.ballVelocity[1] * deltaTime * this.FPS;
+                // Divide o movimento em sub-passos de no máximo um raio de bola,
+                // para não atravessar tijolos/barra em frames lentos (tunneling)
+                const frameScale = deltaTime * this.FPS;
+                const speed = Math.sqrt(this.ballVelocity[0] ** 2 + this.ballVelocity[1] ** 2);
+                const steps = Math.max(1, Math.ceil((speed * frameScale) / this.BALL_RADIUS));
 
+                for (let i = 0; i < steps; i++) {{
+                    this.ballPosition[0] += this.ballVelocity[0] * frameScale / steps;
+                    this.ballPosition[1] += this.ballVelocity[1] * frameScale / steps;
+                    if (!this.handleCollisions()) return;
+                }}
+            }}
+
+            // Retorna false quando a bola foi perdida ou o jogo terminou (interrompe os sub-passos)
+            handleCollisions() {{
                 // Colisão com paredes
                 if (this.ballPosition[0] - this.BALL_RADIUS <= 0) {{
                     this.ballPosition[0] = this.BALL_RADIUS;
@@ -249,21 +244,24 @@ breakout_html = f"""
                     }} else {{
                         this.resetBall();
                     }}
-                    return;
+                    return false;
                 }}
 
-                // Colisão com a barra
+                // Colisão com a barra (apenas com a bola descendo, considerando o raio)
                 if (
+                    this.ballVelocity[1] > 0 &&
                     this.ballPosition[1] + this.BALL_RADIUS >= this.barPosition[1] &&
                     this.ballPosition[1] - this.BALL_RADIUS <= this.barPosition[1] + this.BAR_HEIGHT &&
-                    this.ballPosition[0] >= this.barPosition[0] &&
-                    this.ballPosition[0] <= this.barPosition[0] + this.BAR_WIDTH
+                    this.ballPosition[0] + this.BALL_RADIUS >= this.barPosition[0] &&
+                    this.ballPosition[0] - this.BALL_RADIUS <= this.barPosition[0] + this.BAR_WIDTH
                 ) {{
-                    const hitPos = (this.ballPosition[0] - this.barPosition[0]) / this.BAR_WIDTH;
+                    const hitPos = Math.max(0, Math.min(1,
+                        (this.ballPosition[0] - this.barPosition[0]) / this.BAR_WIDTH
+                    ));
                     const angle = (hitPos - 0.5) * Math.PI * 0.8;
-                    const speed = Math.sqrt(this.ballVelocity[0] ** 2 + this.ballVelocity[1] ** 2);
-                    this.ballVelocity[0] = Math.sin(angle) * speed;
-                    this.ballVelocity[1] = -Math.cos(angle) * speed;
+                    const ballSpeed = Math.sqrt(this.ballVelocity[0] ** 2 + this.ballVelocity[1] ** 2);
+                    this.ballVelocity[0] = Math.sin(angle) * ballSpeed;
+                    this.ballVelocity[1] = -Math.cos(angle) * ballSpeed;
                     this.ballPosition[1] = this.barPosition[1] - this.BALL_RADIUS;
                     this.playSound(this.sounds.bounce);
                 }}
@@ -279,19 +277,33 @@ breakout_html = f"""
                     ) {{
                         this.bricks.splice(i, 1);
                         this.score += 10;
-                        this.ballVelocity[1] *= -1;
+                        // Rebate no eixo de menor penetração: lateral inverte X, topo/fundo inverte Y
+                        const overlapX = this.ballPosition[0] < brick.x + brick.width / 2
+                            ? this.ballPosition[0] + this.BALL_RADIUS - brick.x
+                            : brick.x + brick.width - (this.ballPosition[0] - this.BALL_RADIUS);
+                        const overlapY = this.ballPosition[1] < brick.y + brick.height / 2
+                            ? this.ballPosition[1] + this.BALL_RADIUS - brick.y
+                            : brick.y + brick.height - (this.ballPosition[1] - this.BALL_RADIUS);
+                        if (overlapX < overlapY) {{
+                            this.ballVelocity[0] *= -1;
+                        }} else {{
+                            this.ballVelocity[1] *= -1;
+                        }}
                         this.playSound(this.sounds.brick);
                         if (this.bricks.length === 0) {{
                             this.gameState = "victory";
                             this.playSound(this.sounds.victory);
+                            return false;
                         }}
                         break;
                     }}
                 }}
+
+                return true;
             }}
 
             playSound(audio) {{
-                if (audio.src.includes("base64,,")) return;
+                if (audio.src.endsWith("base64,")) return;
                 audio.currentTime = 0;
                 audio.play().catch((e) => console.error("Erro ao tocar som:", e));
             }}
@@ -301,8 +313,8 @@ breakout_html = f"""
                 this.ctx.fillStyle = "{BLACK}";
                 this.ctx.fillRect(0, 0, this.WINDOW_WIDTH, this.WINDOW_HEIGHT);
 
-                // Desenha logo
-                if (this.pythonLogo.complete) {{
+                // Desenha logo (naturalWidth > 0 garante imagem decodificada com sucesso)
+                if (this.pythonLogo.complete && this.pythonLogo.naturalWidth > 0) {{
                     this.ctx.globalAlpha = this.gameState === "playing" ? 0.2 : 1.0;
                     this.ctx.drawImage(this.pythonLogo, this.logoX, this.logoY, this.logoWidth, this.logoHeight);
                     this.ctx.globalAlpha = 1.0;
@@ -350,8 +362,7 @@ breakout_html = f"""
                 const canvas = document.getElementById("gameCanvas");
                 if (!canvas) throw new Error("Canvas não encontrado");
                 const game = new BreakoutGame(canvas);
-                console.log("Jogo Breakout inicializado com sucesso");
-                document.body.focus();
+                canvas.focus();
             }} catch (e) {{
                 console.error("Erro ao inicializar o jogo:", e);
             }}
@@ -375,10 +386,6 @@ st.markdown("""
 
 st.markdown("""
 <style>
-    .main {
-        background-color: #ffffff;
-        color: #333333;
-    }
     .block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;

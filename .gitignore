@@ -1,2 +1,1 @@
-old.py
-sounds_cache.sqlite
+__pycache__/
